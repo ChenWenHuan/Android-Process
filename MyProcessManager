@@ -1,0 +1,205 @@
+package com.android.jin.mobilesafe.utils;
+
+import android.app.ActivityManager;
+import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.widget.Toast;
+
+import com.android.jin.mobilesafe.bean.TaskInfo;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Created by Jin on 2017/8/15.
+ */
+public class MyProcManager {
+
+
+    private  ActivityManager.MemoryInfo outInfo;
+    private  ActivityManager activityManager;
+    private  List<ActivityManager.RunningAppProcessInfo> runningAppProcesses;
+
+
+    public MyProcManager(Context context){
+        activityManager = (ActivityManager) context.getSystemService(context.ACTIVITY_SERVICE);
+        outInfo = new ActivityManager.MemoryInfo();
+        runningAppProcesses = activityManager.getRunningAppProcesses();
+        activityManager.getMemoryInfo(outInfo);
+    }
+
+    /**
+     * 得到手机可用的总运行内存
+     * @return 总运行内存
+     */
+    public  long getTotalMem(){
+        long totalMem = 0;
+        if(Build.VERSION.SDK_INT >= 16){
+            totalMem = outInfo.totalMem;
+        }else{
+            String str = null;
+            try {
+                str = IOUtils.readFileBySingleCharStream(new File("/proc/meminfo"));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            if(str == null) return 0;
+            StringBuffer sb = new StringBuffer();
+            for (char c : str.toCharArray()){
+                if(c >= '0' && c <= '9'){
+                    sb.append(c);
+                }
+            }
+            if(sb == null) return 0;
+            totalMem = Long.parseLong(sb.toString()) * 1024;
+        }
+        return totalMem;
+    }
+
+
+    /**
+     * 得到可用的进程内存
+     * @return size
+     */
+    public  long getAvaiMem(){
+        return outInfo.availMem;
+    }
+
+    /**
+     * 得到运行内存的总个数
+     * @return app count
+     */
+    public int getRunningAppSize(){
+        return getRunningProcessPid().size();
+    }
+
+    /**
+     * 得到运行内存的总个数
+     * @return app count
+     */
+    public static int getRunningAppSize2(){  return getRunningProcessPid().size(); }
+
+
+    /**
+     * 得到所有的运行进程的pid，通过pid你可以调用其他方法来获取该进程的信息
+     * @return 返回一个List集合，需要手动转换为int型
+     */
+    public static List<String> getRunningProcessPid(){
+        List<String> processes = new ArrayList<>();
+        File[] files = new File("/proc").listFiles();
+        for (File file : files) {
+            if (file.isDirectory()) {
+                try {
+                    Integer.parseInt(file.getName());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                processes.add(file.getName());
+            }
+        }
+        return processes;
+    }
+
+    /**
+     * 得到该进程的名字（应用的名字）
+     * @param pid pid
+     * @return app name
+     */
+    public static String getPidName (int pid){
+        String cmdline = null;
+        try {
+            Pattern procName = Pattern.compile("^[a-z]{1}[a-z.]*[.|:][a-z]*");
+            cmdline = IOUtils.readFileByByte(new File(String.format(Locale.ENGLISH, "/proc/%d/cmdline", pid).trim()));
+            Matcher matcher = procName.matcher(cmdline);
+            if(matcher.find()) {
+                cmdline = matcher.group(0);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return cmdline;
+    }
+
+    public static String getStatmContent(int pid){
+        File file = new File(String.format(Locale.ENGLISH, "/proc/%d/statm", pid));
+        String str = null;
+        try {
+            str = IOUtils.readFileByByte(file);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return str;
+    }
+
+    /**
+     * 得到该进程所占用的虚拟空间
+     * @param pid pid
+     * @return size
+     */
+    public static long getSize(int pid){
+        String[] size = getStatmContent(pid).split("\\s+");
+        return Long.parseLong(size[0]) * 1024;
+    }
+
+    /**
+     * 得到该进程占用的内存大小
+     * @param pid pid
+     * @return size
+     */
+    public static long getResidentSize(int pid){
+        String[] size = getStatmContent(pid).split("\\s+");
+        return Long.parseLong(size[1]) * 1024;
+    }
+
+    /**
+     * 得到该进程的包管理信息
+     * @param context context
+     * @param pid pid
+     * @param flags 可以使用0代替
+     * @return
+     * @throws PackageManager.NameNotFoundException
+     */
+    public static PackageInfo getPackageInfo(Context context,int pid, int flags)
+            throws PackageManager.NameNotFoundException {
+        return context.getPackageManager().getPackageInfo(getPackageName(pid), flags);
+    }
+
+    /**
+     * 得到该进程的包名，注意返回值可能为null，建议手动处理异常
+     * @param pid pid
+     * @return package name
+     */
+    public static String getPackageName(int pid){
+        return getPidName(pid).split(":")[0];
+    }
+
+
+    /**
+     * 杀掉所有进程
+     * @param context
+     */
+    public static void killProcess(Context context){
+        ActivityManager am = (ActivityManager) context.getSystemService(context.ACTIVITY_SERVICE);
+        ArrayList<TaskInfo> killTasks = new ArrayList<>();
+        List<String> runningProcessPid = getRunningProcessPid();
+        for(String str : runningProcessPid){
+            int pid = Integer.parseInt(str);
+            try {
+                am.killBackgroundProcesses(getPackageName(pid));
+            }catch (NullPointerException e){
+                continue;
+            }
+        }
+        Toast.makeText(context,"清理完毕",Toast.LENGTH_SHORT).show();
+    }
+
+
+
+}
